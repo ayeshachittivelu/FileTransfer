@@ -1,0 +1,78 @@
+/dts-v1/;
+
+/ {
+    #address-cells = <2>;
+    #size-cells = <2>;
+    compatible = "l4,uvmm-guest";
+    model = "FreeRTOS Virtual Machine (R-Car H3)";
+    interrupt-parent = <&gic>;
+
+    chosen {
+        l4,kernel = "rom/freertos";
+        stdout-path = "/l4vmm/serial@31000000"; 
+    };
+
+    cpus {
+        #address-cells = <2>;
+        #size-cells = <0>;
+        
+        cpu@0 {
+            device_type = "cpu";
+            compatible = "arm,armv8";
+            reg = <0x0 0x0>;
+            enable-method = "psci";
+        };
+    };
+
+    memory@80000000 {
+        device_type = "memory";
+        reg = <0x0 0x80000000 0x0 0x20000000>;
+        l4vmm,dscap = "ram";
+    };
+
+    /* R-Car uses GICv2. GICD is at 0x40000, GICC is at 0x50000 */
+    gic: interrupt-controller@40000 {
+        compatible = "arm,cortex-a15-gic", "arm,cortex-a9-gic";
+        #interrupt-cells = <3>;
+        interrupt-controller;
+        reg = <0x0 0x40000 0x0 0x10000>,
+              <0x0 0x50000 0x0 0x400000>;
+    };
+
+    timer {
+        compatible = "arm,armv8-timer";
+        interrupts = <1 13 0xf08>,
+                     <1 14 0xf08>,
+                     <1 11 0xf08>,
+                     <1 10 0xf08>;
+    };
+
+    psci {
+        compatible = "arm,psci-1.0";
+        method = "hvc";
+    };
+
+    l4vmm {
+        #address-cells = <2>;
+        #size-cells = <2>;
+        compatible = "simple-bus";
+        ranges;
+
+        dummy_clk: dummy_clk {
+            compatible = "fixed-clock";
+            #clock-cells = <0>;
+            clock-frequency = <24000000>;
+        };
+
+        /* KEPT AT 0x31000000 to match your FreeRTOS binary */
+        serial@31000000 {
+            compatible = "arm,pl011", "arm,primecell";
+            reg = <0x0 0x31000000 0x0 0x1000>;
+            interrupts = <0 40 4>;
+            clocks = <&dummy_clk>;
+            clock-names = "apb_pclk";
+            status = "okay";
+            l4vmm,console;
+        };
+    };
+};
