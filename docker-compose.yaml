@@ -1,0 +1,106 @@
+version: "3.8"
+
+services:
+
+  mock-ecu:
+    image: merged_mock_ecu_arm_vcan:V1_2
+    container_name: mock-ecu
+    network_mode: "host"  # Required to read/write to host vcan0 link
+    user: "root"          # Ensures the internal binary has root privilege clearance
+    cap_add:
+      - NET_ADMIN         # Allows interface manipulation and state bindings
+      - NET_RAW           # REQUIRED: Gives permission to open SOCK_RAW CAN sockets
+    healthcheck:
+      # Verifies the internal C binary process is up and active
+      test: ["CMD-SHELL", "pidof mock_ecu || exit 1"]
+      interval: 1s
+      timeout: 1s
+      retries: 3
+      start_period: 1s
+
+  my-gateway:
+    image: sovd_doip_can_gateway_arm:V1_1
+    container_name: my-gateway
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - ./gen_config:/app/gen_config
+    restart: always
+    depends_on:
+      mock-ecu:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "kill -0 1"]
+      interval: 2s
+      timeout: 2s
+      retries: 5
+
+  cda:
+    image: testcontainer-cda:latest
+    container_name: cda
+    platform: linux/arm64
+    ports:
+      - "20002:20002"
+    environment:
+      - RUST_LOG=debug
+    command: ["-d", "/app/odx"]
+    volumes:
+      - ./gen_config/mdd_file:/app/odx
+    restart: always
+    depends_on:
+      my-gateway:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "kill -0 1"]
+      interval: 2s
+      timeout: 2s
+      retries: 5
+      start_period: 5s
+
+  sovd-server:
+    image: sovd-server:arm64
+    container_name: sovd-server
+    platform: linux/arm64
+    network_mode: host
+    depends_on:
+      - cda
+
+  databroker:
+    image: databroker-cummins:arm64
+    container_name: databroker
+    network_mode: host
+    volumes:
+      - ./databroker_configs:/databroker_configs
+    command:
+      - --vss
+      - /databroker_configs/data_broker_cummins_vss.json
+    restart: always
+
+  can-provider:
+    image: can-cummins:arm64
+    container_name: can-provider
+    network_mode: host
+    depends_on:
+      - databroker
+    environment:
+      CUSTOM_CONFIG_PATH: /can_provider_configs/dbc_feeder.ini
+    volumes:
+      - ./can_provider_configs:/can_provider_configs
+    command:
+      - python3
+      - -u
+      - dbcfeeder.py
+      - --config
+      - /can_provider_configs/dbc_feeder.ini
+    restart: always
+
+  connectivity:
+    image: connectivity-db:arm64
+    container_name: connectivity
+    network_mode: host
+    environment:
+      MQTT_BROKER: 10.246.49.210
+      KUKSA_HOST: 127.0.0.1
+      BASE_HOST: http://127.0.0.1
+
